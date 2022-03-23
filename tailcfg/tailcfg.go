@@ -1674,3 +1674,21 @@ type OverTLSPublicKeyResponse struct {
 	// control/controlbase and control/controlhttp)
 	PublicKey key.MachinePublic `json:"publicKey"`
 }
+
+// TokenRequest is a request to get an ID token for the given audience.
+//
+// It is JSON-encoded and sent over Noise to "/machine/id-token".
+type TokenRequest struct {
+	// CapVersion is the clients current CapabilityVersion.
+	CapVersion CapabilityVersion
+	// NodeKey is the client's current node key.
+	NodeKey key.NodePublic
+	// Audience the token is being requested for.
+	Audience string
+}
+
+// TokenResponse is the response to a TokenRequest.
+type TokenResponse struct {
+	// IDToken is the token
+	IDToken string `json:"id_token"`
+}
