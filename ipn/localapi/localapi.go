@@ -6,6 +6,7 @@
 package localapi
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -24,6 +25,7 @@ import (
 
 	"inet.af/netaddr"
 	"tailscale.com/client/tailscale/apitype"
+	"tailscale.com/envknob"
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/ipnlocal"
 	"tailscale.com/ipn/ipnstate"
@@ -128,10 +130,63 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveSetExpirySooner(w, r)
 	case "/localapi/v0/dial":
 		h.serveDial(w, r)
+	case "/localapi/v0/id-token":
+		h.serveIDToken(w, r)
 	case "/":
 		io.WriteString(w, "tailscaled\n")
 	default:
 		http.Error(w, "404 not found", 404)
+	}
+}
+
+func (h *Handler) serveIDToken(w http.ResponseWriter, r *http.Request) {
+	if !h.PermitWrite {
+		http.Error(w, "id-token access denied", http.StatusForbidden)
+		return
+	}
+	if !envknob.UseWIPCode() {
+		http.Error(w, "id-token access denied", http.StatusServiceUnavailable)
+		return
+	}
+	nm := h.b.NetMap()
+	if nm == nil {
+		http.Error(w, "no netmap", http.StatusServiceUnavailable)
+		return
+	}
+	aud := strings.TrimSpace(r.FormValue("aud"))
+	if len(aud) == 0 {
+		http.Error(w, "no audience requested", http.StatusBadRequest)
+		return
+	}
+	req := &tailcfg.TokenRequest{
+		CapVersion: tailcfg.CurrentCapabilityVersion,
+		Audience:   aud,
+		NodeKey:    nm.NodeKey,
+	}
+	b, err := json.Marshal(req)
+	if err != nil {
+		w.WriteHeader(500)
+		fmt.Fprintln(w, err)
+		return
+	}
+	httpReq, err := http.NewRequest("POST", "https://unused/machine/id-token", bytes.NewReader(b))
+	if err != nil {
+		w.WriteHeader(500)
+		fmt.Fprintln(w, err)
+		return
+	}
+	resp, err := h.b.DoNoiseRequest(httpReq)
+	if err != nil {
+		w.WriteHeader(500)
+		fmt.Fprintln(w, err)
+		return
+	}
+	defer resp.Body.Close()
+	w.WriteHeader(resp.StatusCode)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		w.WriteHeader(500)
+		fmt.Fprintln(w, err)
+		return
 	}
 }
 
